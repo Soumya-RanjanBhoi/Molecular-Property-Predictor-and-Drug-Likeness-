@@ -169,7 +169,6 @@ def feature_extract(smiles: str):
         "BalabanJ": Descriptors.BalabanJ(mol)
     }
 
-# ------------------ Pydantic Model ------------------
 class Molecular_var(BaseModel):
     smiles: Annotated[str, Field(..., description='SMILES of the molecule', example='CCO')]
 
