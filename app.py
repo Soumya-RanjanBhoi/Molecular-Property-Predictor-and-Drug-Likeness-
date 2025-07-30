@@ -15,7 +15,6 @@ st.title("🧪 Molecular Property Predictor")
 smiles = st.text_input("Enter SMILES string:", value="CCO", help="Type a valid SMILES (e.g., CCO for ethanol)")
 
 def optimize_structure(smiles):
-    """Generate an optimized 3D structure using RDKit."""
     mol = Chem.MolFromSmiles(smiles)
     if not mol:
         return None, "Invalid SMILES"
@@ -30,7 +29,6 @@ def optimize_structure(smiles):
         return mol, "Optimization failed, but 3D coords generated "
 
 def render_3d(mol):
-    """Render molecule in an interactive 3D viewer using py3Dmol."""
     mblock = Chem.MolToMolBlock(mol)
     viewer = py3Dmol.view(width=400, height=400)
     viewer.addModel(mblock, 'mol')
@@ -99,6 +97,6 @@ if smiles:
                 buf = BytesIO()
                 buf.write(report_text.encode())
                 buf.seek(0)
-                st.download_button("📄 Download TXT Report", data=buf, file_name="molecule_report.txt", mime="text/plain")
+                st.download_button(" Download TXT Report", data=buf, file_name="molecule_report.txt", mime="text/plain")
     else:
-        st.error("❌ Invalid SMILES string. Please check your input.")
+        st.error("Invalid SMILES string. Please check your input.")
