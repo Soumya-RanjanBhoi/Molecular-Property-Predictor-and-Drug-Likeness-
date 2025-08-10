@@ -63,7 +63,7 @@ idna==3.8
 importlib_metadata==8.4.0
 ipykernel==6.29.5
 ipython==8.28.0
-ipython-pygments-lexers==0.1.0
+ipython-pygments-lexers==1.1.1
 ipywidgets==8.1.5
 isoduration==20.11.0
 jedi==0.19.1
@@ -218,3 +218,4 @@ wrapt==1.17.2
 xgboost==3.0.3
 zipp==3.20.2
 zstandard==0.23.0
+
