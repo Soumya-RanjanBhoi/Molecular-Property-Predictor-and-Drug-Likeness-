@@ -3,49 +3,43 @@ from pydantic import BaseModel, Field, validator
 from typing import Annotated
 from fastapi.responses import JSONResponse
 from rdkit import Chem
-from rdkit.Chem import Descriptors, AllChem
+from rdkit.Chem import Descriptors, AllChem, QED, rdMolDescriptors, Lipinski
 from rdkit import DataStructs
 import pickle
 import torch
 import torch.nn as nn
 import numpy as np
 from collections import OrderedDict
+import xgboost as xgb
 
 app = FastAPI()
-
-
 
 
 with open('model_solubility.pkl', 'rb') as f:
     solubility_model = pickle.load(f)
 
-with open('drug_likeness.pkl', 'rb') as f:
+with open('xgb_model_drug.pkl', 'rb') as f:
     drug_model = pickle.load(f)
 
-with open('drug_scaler.pkl', 'rb') as f:
+with open('drug_scaler_1.pkl', 'rb') as f:
     drug_scaler = pickle.load(f)
 
-tox_model = None
-
+tox_model = None 
 
 
 
 class ToxicityNet(nn.Module):
-    def __init__(self, input_dim, hidden_dim=1908, output_dim=24, dropout=0.1798):
+    def __init__(self, input_dim=1024, hidden_dim=2000, output_dim=12, dropout=0.18, stddev=0.025):
         super(ToxicityNet, self).__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
+        nn.init.normal_(self.fc1.weight, mean=0, std=stddev)
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
         self.fc2 = nn.Linear(hidden_dim, output_dim)
+        nn.init.normal_(self.fc2.weight, mean=0, std=stddev)
 
     def forward(self, x):
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.dropout(x)
-        x = self.fc2(x)
-        return x
-
-
+        return self.fc2(self.dropout(self.relu(self.fc1(x))))
 
 
 
@@ -58,15 +52,12 @@ def morgan_fingerprint(smiles, radius=2, nBits=1024):
     DataStructs.ConvertToNumpyArray(fp, arr)
     return arr
 
-
-
-
-def report_toxicity_pytorch(smiles, model, threshold=0.5):
+def report_toxicity_pytorch(smiles, model, threshold=0.75):
     fp = morgan_fingerprint(smiles)
     if fp is None:
         return "Invalid SMILES string."
 
-    x = torch.tensor(fp, dtype=torch.float32).unsqueeze(0)
+    x = torch.tensor([fp], dtype=torch.float32)
 
     with torch.no_grad():
         logits = model(x)
@@ -101,37 +92,25 @@ def report_toxicity_pytorch(smiles, model, threshold=0.5):
         pred = preds[i]
         if pred == 1:
             any_toxic = True
-            report_lines.append(f" [{task}] Toxicity Likely (Probability: {prob:.2f})")
-            report_lines.append(f"    ↳ {assay_info.get(task, 'No description available.')}")
+            report_lines.append(f"[{task}] Toxicity Likely (Probability: {prob:.2f})")
+            report_lines.append(f"   ↳ {assay_info.get(task, 'No description available.')}")
     if not any_toxic:
-        report_lines.append(" No significant toxicity predicted.")
+        report_lines.append("No significant toxicity predicted.")
 
     return "\n".join(report_lines)
-
 
 
 
 @app.on_event("startup")
 def load_toxicity_model():
     global tox_model
-    state_dict = torch.load("tox21_model_state.pt", map_location="cpu")
+    state_dict = torch.load("final_tox21_model_state.pt", map_location="cpu", weights_only=True)
 
-    new_state_dict = OrderedDict()
-    for key, value in state_dict.items():
-        if key == "layers.0.weight":
-            new_state_dict["fc1.weight"] = value
-        elif key == "layers.0.bias":
-            new_state_dict["fc1.bias"] = value
-        elif key == "output_layer.weight":
-            new_state_dict["fc2.weight"] = value
-        elif key == "output_layer.bias":
-            new_state_dict["fc2.bias"] = value
-
-    model = ToxicityNet(input_dim=1024, hidden_dim=1908, output_dim=24, dropout=0.1798)
-    model.load_state_dict(new_state_dict)
+    model = ToxicityNet(input_dim=1024, hidden_dim=2000, output_dim=12, dropout=0.18)
+    model.load_state_dict(state_dict)
     model.eval()
-
     tox_model = model
+
     print("Toxicity model loaded successfully!")
 
 
@@ -159,16 +138,17 @@ def feature_extract(smiles: str):
     return {
         "MolWt": Descriptors.MolWt(mol),
         "LogP": Descriptors.MolLogP(mol),
-        "TPSA": Descriptors.TPSA(mol),
+        "Formal_Charge": Chem.GetFormalCharge(mol),
         "NumHDonors": Descriptors.NumHDonors(mol),
         "NumHAcceptors": Descriptors.NumHAcceptors(mol),
-        "NumRotatableBonds": Descriptors.NumRotatableBonds(mol),
-        "RingCount": Descriptors.RingCount(mol),
-        "HeavyAtomCount": Descriptors.HeavyAtomCount(mol),
-        "FractionCSP3": Descriptors.FractionCSP3(mol),
-        "BalabanJ": Descriptors.BalabanJ(mol)
+        "armotic_ring": rdMolDescriptors.CalcNumAromaticRings(mol),
+        "stero_centre": len(Chem.FindMolChiralCenters(mol, includeUnassigned=True)),
+        "rot_bond": Lipinski.NumRotatableBonds(mol),
+        "qed_score": QED.qed(mol)
     }
 
+
+#
 class Molecular_var(BaseModel):
     smiles: Annotated[str, Field(..., description='SMILES of the molecule', example='CCO')]
 
@@ -198,14 +178,11 @@ def predict_solubility(smiles: Molecular_var):
     ]
 
     value = solubility_model.predict([params])
-
     return JSONResponse(status_code=200, content={
         'smiles': smiles.smiles,
         'predicted_solubility': round(float(value[0]), 2),
         'descriptors': details
     })
-
-
 
 @app.post('/predictTox', tags=['predict'])
 def predict_toxicity(smiles: Molecular_var):
@@ -219,14 +196,16 @@ def predict_toxicity(smiles: Molecular_var):
 def predict_drug(smiles: Molecular_var):
     desc = feature_extract(smiles.smiles)
 
-    param = [desc['MolWt'], desc['LogP'], desc['TPSA'], desc['NumHDonors'], desc['NumHAcceptors'],
-             desc['NumRotatableBonds'], desc['RingCount'], desc['HeavyAtomCount'],
-             desc['FractionCSP3'], desc['BalabanJ']]
+    param = [
+        desc['MolWt'], desc['LogP'], desc['Formal_Charge'], desc['NumHDonors'],
+        desc['NumHAcceptors'], desc['armotic_ring'], desc['stero_centre'], desc['rot_bond']
+    ]
 
     scaled = drug_scaler.transform([param])
     prediction = drug_model.predict_proba(scaled)
 
     return JSONResponse(status_code=200, content={
-        'Drug Class': int(np.argmax(prediction)),           
-        'Drug Probability': float(prediction[0][1])        
+        'Drug Class': int(np.argmax(prediction)),
+        'Drug Probability': float(np.max(prediction)),
+        "qed_Score": desc['qed_score']
     })
