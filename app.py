@@ -29,6 +29,7 @@ def optimize_structure(smiles):
         return mol, "Optimization failed, but 3D coords generated "
 
 def render_3d(mol):
+    """Render molecule in an interactive 3D viewer using py3Dmol."""
     mblock = Chem.MolToMolBlock(mol)
     viewer = py3Dmol.view(width=400, height=400)
     viewer.addModel(mblock, 'mol')
@@ -84,8 +85,9 @@ if smiles:
                 st.dataframe(pd.DataFrame(sol["descriptors"].items(), columns=["Feature", "Value"]))
 
                 st.subheader("🔹 Drug-likeness")
-                st.write(f"**Class:** {'Likely Drug' if drug['Drug Class'] == 1 else 'Non-drug'}")
+                st.write(f"**Class:** {'Likely Drug' if drug['Drug Probability'] >= 0.5 else 'Non-drug'}")
                 st.write(f"**Probability:** {drug['Drug Probability']:.3f}")
+                # st.write(f"**QED SCORE :** {drug['qed_Score']:.3f}")
 
                 st.subheader("🔹 Toxicity Report")
                 st.code(tox["toxicity_report"])
@@ -97,6 +99,6 @@ if smiles:
                 buf = BytesIO()
                 buf.write(report_text.encode())
                 buf.seek(0)
-                st.download_button(" Download TXT Report", data=buf, file_name="molecule_report.txt", mime="text/plain")
+                st.download_button("📄 Download TXT Report", data=buf, file_name="molecule_report.txt", mime="text/plain")
     else:
         st.error("Invalid SMILES string. Please check your input.")
