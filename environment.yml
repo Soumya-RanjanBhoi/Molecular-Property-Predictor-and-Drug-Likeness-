@@ -1,0 +1,22 @@
+name: rdkit_env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11.13
+  - rdkit
+  - pandas
+  - numpy
+  - scikit-learn
+  - fastapi
+  - uvicorn
+  - streamlit
+  - xgboost
+  - pytorch
+  - cpuonly
+  - py3dmol
+  - pydantic
+
+  - curl
+  - pip
+  - pip:
+      - requests
